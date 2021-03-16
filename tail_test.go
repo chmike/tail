@@ -133,92 +133,92 @@ func TestScanLines(t *testing.T) {
 	lineChanSize = savedLineChanSize
 }
 
-func TestReadLines(t *testing.T) {
-
-}
-
-/*
-func TestTailWithNonExistingFile(t *testing.T) {
-	fileName := "toto_xyz"
-	tail := NewTail(fileName)
-	_, ok := <-tail.Line
-	if ok {
-		t.Fatal("expect Line channel to be closed")
-	}
-
-	err, ok := <-tail.Error
-	if !ok {
-		t.Fatal("expected to read an error from Error channel")
-	}
-	if err == nil {
-		t.Fatal("unexpected nil error")
-	}
-	if !os.IsNotExist(err) {
-		t.Fatal("unexpected error:", err)
-	}
-}
-
-func TestTailCloseWithEmptyFile(t *testing.T) {
+func TestAppendingToFile(t *testing.T) {
 	testFile := createTmpFile(t)
 	fileName := testFile.Name()
+	testFile.Write([]byte("line 1\n"))
 	defer testFile.Close()
 	defer os.Remove(fileName)
+
 	tail := NewTail(fileName)
-	tail.Close()
-	_, ok := <-tail.Line
-	if ok {
-		t.Fatal("unexpected line read from file")
+	defer tail.Close()
+
+	line := <-tail.Line
+	if line != "line 1" {
+		t.Fatal("expected 'line 1', got", line)
+	}
+	go func() {
+		time.Sleep(time.Second)
+		testFile.Write([]byte("line 2\n"))
+	}()
+	line = <-tail.Line
+	if line != "line 2" {
+		t.Fatal("expected 'line 2', got", line)
 	}
 }
 
-func TestTailCloseWithNonEmptyFile(t *testing.T) {
+func TestFileRotation(t *testing.T) {
 	testFile := createTmpFile(t)
 	fileName := testFile.Name()
-	//testFile.Write([]byte("line 1\nline 2\r\nline 3\nline 4"))
+	testFile.Write([]byte("line 1\nline 2"))
 	defer testFile.Close()
+	defer os.Remove(fileName)
 
 	tail := NewTail(fileName)
-	tail.Close()
-	_, ok := <-tail.Line
-	if ok {
-		t.Fatal("unexpected line read from file")
+	defer tail.Close()
+
+	line := <-tail.Line
+	if line != "line 1" {
+		t.Fatal("expected 'line 1', got", line)
 	}
 
-	testFile.Write([]byte("line 1\nline 2\r\nline 3\nline 4"))
-	tail = NewTail(fileName)
+	os.Rename(fileName, fileName+"x")
+	defer os.Remove(fileName + "x")
+	time.Sleep(2 * time.Second)
+	testFile, err := os.Create(fileName)
+	if err != nil {
+		t.Fatal("unexpected error:", err)
+	}
+	testFile.Write([]byte("line 3\n"))
+	defer testFile.Close()
 
+	line = <-tail.Line
+	if line != "line 2" {
+		t.Fatal("expected 'line 2', got", line)
+	}
+	line = <-tail.Line
+	if line != "line 3" {
+		t.Fatal("expected 'line 3', got", line)
+	}
+
+	go func() {
+		time.Sleep(time.Second)
+		testFile.Write([]byte("line 4\n"))
+	}()
+	line = <-tail.Line
+	if line != "line 4" {
+		t.Fatal("expected 'line 4', got", line)
+	}
 }
-*/
 
-// func readAllLines(tail *Tail) []string {
-// 	lines := make([]string, 0, 10)
-// 	for {
-// 		select {
-// 		case <-tail.done:
-// 			return lines
-// 		case line := <-tail.Line:
-// 			lines = append(lines, line)
-// 		}
-// 	}
-// }
+func TestRunTailErrors(t *testing.T) {
+	testFile := createTmpFile(t)
+	fileName := testFile.Name()
+	testFile.Write([]byte("line 1\nline 2"))
+	defer testFile.Close()
+	defer os.Remove(fileName)
 
-// func TestScanLines(t *testing.T) {
-// 	testFile := createTmpFile(t)
-// 	fileName := testFile.Name()
-// 	testFile.Write([]byte("line 1\nline 2\r\nline 3\nline 4"))
-// 	testFile.Close()
+	dummyError := errors.New("dummy error")
+	testError = dummyError
+	tail := NewTail(fileName)
 
-// 	var err error
-// 	tail := NewTail(fileName)
-// 	tail.file, err = os.Open(testFile.Name())
-// 	if err != nil {
-// 		t.Fatal("failed opening test file:", err)
-// 	}
+	var err error
+	select {
+	case err = <-tail.Error:
+	default:
+	}
 
-// 	err = tail.scanLines()
-// 	if err != io.EOF {
-// 		t.Fatal("unexpected error:", err)
-// 	}
-// 	lines := make([]string, 0, 10)
-
-// }
+	if err != dummyError {
+		t.Fatal("expected error, got", err)
+	}
+}

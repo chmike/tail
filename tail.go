@@ -6,6 +6,7 @@ package main
 import (
 	"io"
 	"os"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -37,7 +38,7 @@ func NewTail(fileName string) *Tail {
 		done:     make(chan struct{}),
 		buf:      make([]byte, bufInitSize),
 	}
-	go readLines(t)
+	go runTail(t)
 	return t
 }
 
@@ -91,71 +92,9 @@ func (t *Tail) openFile() error {
 	return nil
 }
 
-// read lines from file
-func readLines(t *Tail) {
-	var err error
-	defer func() {
-		if t.file != nil {
-			t.file.Close()
-			t.file = nil
-		}
-		if err != nil {
-			t.Error <- err
-		}
-		t.Close()
-	}()
-
-	// try starting watcher
-	if t.watcher, err = fsnotify.NewWatcher(); err != nil || testError != nil {
-		if err == nil {
-			err = testError
-		}
-		return
-	}
-
-	// try open file
-	if err = t.openFile(); err != nil {
-		return
-	}
-	// read all existing lines in file
-	if err = t.scanLines(); err != io.EOF {
-		return
-	}
-
-	// start watching file to detect appending or file renaming
-	if err = t.watcher.Add(t.fileName); err != nil || testError2 != nil {
-		if err == nil {
-			err = testError2
-		}
-		return
-	}
-
-	// loop over file change events
-	for {
-		var event fsnotify.Event
-		var ok bool
-
-		select {
-		case <-t.done:
-			return
-		case event, ok = <-t.watcher.Events:
-			if !ok {
-				return
-			}
-			if event.Op&fsnotify.Write == fsnotify.Write {
-				if err = t.scanLines(); err != io.EOF {
-					return
-				}
-			}
-		case err, ok = <-t.watcher.Errors:
-			return
-		}
-	}
-}
-
-// scanLines outputs lines read from file until an error or io.EOF is met,
+// readLines output lines read from the file until an error or io.EOF is met,
 // or done is closed. It returns the error, or nil when done is closed.
-func (t *Tail) scanLines() error {
+func (t *Tail) readLines() error {
 	for {
 		if len(t.buf) == t.nbytes {
 			tmp := make([]byte, len(t.buf)*2)
@@ -186,6 +125,92 @@ func (t *Tail) scanLines() error {
 		}
 		if begPos != 0 {
 			t.nbytes = copy(t.buf, buf[begPos:])
+		}
+	}
+}
+
+// runTail is the goroutine that read lines from the file.
+func runTail(t *Tail) {
+	var err error
+	defer func() {
+		if t.file != nil {
+			t.file.Close()
+			t.file = nil
+		}
+		if err != nil {
+			t.Error <- err
+		}
+		t.Close()
+	}()
+
+	// try starting watcher
+	if t.watcher, err = fsnotify.NewWatcher(); err != nil || testError != nil {
+		if err == nil {
+			err = testError
+		}
+		return
+	}
+
+	// try open file
+	if err = t.openFile(); err != nil {
+		return
+	}
+	// read all existing lines in file
+	if err = t.readLines(); err != io.EOF {
+		return
+	}
+
+	// start watching file to detect appending or file renaming
+	if err = t.watcher.Add(t.fileName); err != nil || testError2 != nil {
+		if err == nil {
+			err = testError2
+		}
+		return
+	}
+
+	// loop over file change events
+	for {
+		var event fsnotify.Event
+		var ok bool
+
+		select {
+		case <-t.done:
+			return
+		case event, ok = <-t.watcher.Events:
+			if !ok {
+				return
+			}
+			if event.Op&fsnotify.Write == fsnotify.Write {
+				// text was appended to file
+				if err = t.readLines(); err != io.EOF {
+					return
+				}
+			} else if event.Op&fsnotify.Rename == fsnotify.Rename {
+				// a file rotation occured
+				if t.nbytes > 0 && !t.outputLine(t.buf[:t.nbytes]) {
+					return
+				}
+				t.nbytes = 0
+				t.file.Close()
+				t.watcher.Remove(t.fileName)
+				delay, maxDelay := time.Second, 30*time.Second
+				for delay < maxDelay {
+					if err = t.openFile(); err == nil {
+						break
+					}
+					time.Sleep(delay)
+					delay *= 2
+				}
+				if err != nil {
+					return
+				}
+				t.watcher.Add(t.fileName)
+				if err = t.readLines(); err != io.EOF {
+					return
+				}
+			}
+		case err, ok = <-t.watcher.Errors:
+			return
 		}
 	}
 }
