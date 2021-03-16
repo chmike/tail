@@ -168,7 +168,7 @@ func runTail(t *Tail) {
 	}
 
 	// loop over file change events
-	for {
+	for !t.IsClosed() {
 		var event fsnotify.Event
 		var ok bool
 
