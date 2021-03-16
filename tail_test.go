@@ -91,14 +91,14 @@ func TestOpenFile(t *testing.T) {
 	tail.file.Close()
 	tail.file = nil
 
-	testError = errors.New("test error")
+	testError1 = errors.New("test error")
 	err = tail.openFile()
-	if err != testError {
-		t.Fatal("expected error ", testError, "got", err)
+	if err != testError1 {
+		t.Fatal("expected error ", testError1, "got", err)
 	}
 	tail.file.Close()
 	tail.file = nil
-	testError = nil
+	testError1 = nil
 }
 
 func TestScanLines(t *testing.T) {
@@ -120,14 +120,14 @@ func TestScanLines(t *testing.T) {
 		}
 	}
 	tail.Close()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	savedLineChanSize := lineChanSize
 	lineChanSize = 2
 	tail = NewTail(fileName)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	tail.Close()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	bufInitSize = savedBufInitSize
 	lineChanSize = savedLineChanSize
@@ -209,16 +209,67 @@ func TestRunTailErrors(t *testing.T) {
 	defer os.Remove(fileName)
 
 	dummyError := errors.New("dummy error")
-	testError = dummyError
+	testError1 = dummyError
 	tail := NewTail(fileName)
-
+	time.Sleep(250 * time.Millisecond)
+	if !tail.IsClosed() {
+		t.Fatal("expected closed")
+	}
 	var err error
 	select {
 	case err = <-tail.Error:
 	default:
 	}
-
 	if err != dummyError {
 		t.Fatal("expected error, got", err)
 	}
+	tail.Close()
+	testError1 = nil
+	err = nil
+
+	tail = NewTail(fileName)
+	testError2 = dummyError
+	time.Sleep(250 * time.Millisecond)
+	if !tail.IsClosed() {
+		t.Fatal("expected closed")
+	}
+	select {
+	case err = <-tail.Error:
+	default:
+	}
+	if err != dummyError {
+		t.Fatal("expected error, got", err)
+	}
+	testError2 = nil
+	err = nil
+	tail.Close()
+
+	tail = NewTail("non_existing_test_file")
+	time.Sleep(250 * time.Millisecond)
+	if !tail.IsClosed() {
+		t.Fatal("expected closed")
+	}
+	select {
+	case err = <-tail.Error:
+	default:
+	}
+	if !os.IsNotExist(err) {
+		t.Fatal("expected error, got", err)
+	}
+	err = nil
+	tail.Close()
+
+	tail = NewTail(fileName)
+	time.Sleep(250 * time.Millisecond)
+	tail.watcher.Errors <- dummyError
+	time.Sleep(250 * time.Millisecond)
+	select {
+	case err = <-tail.Error:
+	default:
+	}
+	if err != dummyError {
+		t.Fatal("expected error, got", err)
+	}
+	err = nil
+	tail.Close()
 }

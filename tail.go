@@ -12,10 +12,9 @@ import (
 )
 
 var (
-	lineChanSize = 100
-	bufInitSize  = 2048
-	testError    error
-	testError2   error
+	lineChanSize           = 100
+	bufInitSize            = 2048
+	testError1, testError2 error
 )
 
 type Tail struct {
@@ -82,9 +81,9 @@ func (t *Tail) openFile() error {
 		return err
 	}
 	stat, err := t.file.Stat()
-	if err != nil || testError != nil {
+	if err != nil || testError1 != nil {
 		if err == nil {
-			err = testError
+			err = testError1
 		}
 		return err
 	}
@@ -144,9 +143,9 @@ func runTail(t *Tail) {
 	}()
 
 	// try starting watcher
-	if t.watcher, err = fsnotify.NewWatcher(); err != nil || testError != nil {
+	if t.watcher, err = fsnotify.NewWatcher(); err != nil || testError1 != nil {
 		if err == nil {
-			err = testError
+			err = testError1
 		}
 		return
 	}
